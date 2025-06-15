@@ -9,6 +9,13 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+# Change to keywords and phrases for searching
+SEARCH_PHRASE = "จัดการ น้ำ"
+
+# Change to desired ccollection for searching
+SEARCH_COLLECTION = "NRCT"
+
+
 collections = {
     "ALL": {"id": "all"},
     "TDRI": {"id": "57"},
@@ -44,6 +51,7 @@ def search_from_phrase(phrase: str, collection="TDRI", page=1, page_size=10) -> 
         "data": json.dumps(search_settings),
     }
     response = requests.post(search_url, data=form_data, verify=False)
+    assert response.status_code == 200, "Unable to retrieve search results"
     resp_js = json.loads(response.text)
     return resp_js
 
@@ -132,8 +140,19 @@ def extract_search_details(search_resp: Any) -> Tuple[Any, Any]:
     return result, debug_doc
 
 
+def get_num_results(phrase: str, collection: str) -> int:
+    search_resp = search_from_phrase(SEARCH_PHRASE, page_size=1, collection=collection)
+    assert search_resp["result"]["metadata"]["total"]["relation"] == "eq"
+    return search_resp["result"]["metadata"]["total"]["value"]
+
+
 if __name__ == "__main__":
-    search_resp = search_from_phrase("จัดการ น้ำ", page_size=10, collection="NRCT")
+
+    num_results = get_num_results(SEARCH_PHRASE, SEARCH_COLLECTION)
+    print(f"Found {num_results} results")
+    search_resp = search_from_phrase(
+        SEARCH_PHRASE, page_size=num_results, collection=SEARCH_COLLECTION
+    )
     result, debug_doc = extract_search_details(search_resp)
     with open("result.json", "w") as f:
         json.dump(result, f, indent=4)
