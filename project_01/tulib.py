@@ -1,11 +1,19 @@
 import json
 import re
+from datetime import datetime
 from typing import Any, List, Tuple
 
 import requests
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+# Change to keywords and phrases for searching
+SEARCH_PHRASE = "จัดการ น้ำ"
+
+# Change to desired ccollection for searching
+SEARCH_COLLECTION = "NRCT"
 
 
 collections = {
@@ -43,30 +51,35 @@ def search_from_phrase(phrase: str, collection="TDRI", page=1, page_size=10) -> 
         "data": json.dumps(search_settings),
     }
     response = requests.post(search_url, data=form_data, verify=False)
+    assert response.status_code == 200, "Unable to retrieve search results"
     resp_js = json.loads(response.text)
     return resp_js
 
 
-def search_for_links(obj: Any) -> List[str]:
-    links = []
-    pattern = r"https://\S+?(?=\s|$)"
+def search_recur(obj: Any, search_type: str) -> List[str]:
+    occurences = []
+    assert search_type in ["LINK", "EMAIL"], "Unknown search type"
+    link_pattern = r"https://\S+?(?=\s|$)"
+    email_pattern = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
+    pattern = link_pattern if search_type == "LINK" else email_pattern
+
     if isinstance(obj, dict):
         for _, value in obj.items():
-            links.extend(search_for_links(value))
+            occurences.extend(search_recur(value, search_type))
     elif isinstance(obj, list):
         for item in obj:
-            links.extend(search_for_links(item))
+            occurences.extend(search_recur(item, search_type))
     elif isinstance(obj, str):
-        links.extend(re.findall(pattern, obj))
+        occurences.extend(re.findall(pattern, obj))
     else:
-        return links
-    return list(set(links))
+        return occurences
+    return list(set(occurences))
 
 
 def get_links(entry_resp: Any) -> List[str]:
     tu_dl_url = "https://digital.library.tu.ac.th/tu_dc/digital/api/DownloadDigitalFile/dowload/{}"
 
-    links = search_for_links(entry_resp["template_data"])
+    links = search_recur(entry_resp["template_data"], "LINK")
     if len(links) == 0:
         if not "digital" in entry_resp:
             return links
@@ -88,7 +101,7 @@ def extract_search_details(search_resp: Any) -> Tuple[Any, Any]:
     debug_doc = []
     result = []
 
-    accpeted_description_fld = ["description", "Table of contents"]
+    accpeted_description_fld = ["description", "TH Abstract", "Table of contents"]
     for entry in search_resp["result"]["result"]:
         details = {}
         bibid = entry["bibid"]
@@ -101,16 +114,25 @@ def extract_search_details(search_resp: Any) -> Tuple[Any, Any]:
         entry_resp = json.loads(response.text)
         debug_doc.append(entry_resp["template_data"])
 
-        details["_doc_url"] = doc_url
+        details["_doc_metadata_url"] = doc_url
+        details["_doc_page_url"] = entry["link"]
         details["title"] = entry["title"]
-        details["keywords"] = [keyword for keyword in entry["keyword_full"]]
+        details["author"] = entry_resp["biblio_info"]["author"].split(";")
+        details["email"] = search_recur(entry_resp, "EMAIL")
+        details["keyword"] = [keyword for keyword in entry["keyword_full"]]
         details["organization"] = entry_resp["biblio_info"]["cat_name"]
         details["description"] = None
         for section in ["fld_name", "fld_tag"]:
             for fld in accpeted_description_fld:
                 if fld in entry_resp["template_data"][section]:
                     details["description"] = entry_resp["template_data"][section][fld]
-        details["created_date"] = entry_resp["biblio_info"]["time_create"]
+        details["created_date"] = (
+            datetime.strptime(
+                entry_resp["biblio_info"]["time_create"], "%Y-%m-%d %H:%M:%S"
+            )
+            .date()
+            .strftime("%Y-%m-%d")
+        )
         details["URL"] = get_links(entry_resp)
         details["authored_year"] = entry["pubyear_highlight"]
         result.append(details)
@@ -118,18 +140,21 @@ def extract_search_details(search_resp: Any) -> Tuple[Any, Any]:
     return result, debug_doc
 
 
+def get_num_results(phrase: str, collection: str) -> int:
+    search_resp = search_from_phrase(SEARCH_PHRASE, page_size=1, collection=collection)
+    assert search_resp["result"]["metadata"]["total"]["relation"] == "eq"
+    return search_resp["result"]["metadata"]["total"]["value"]
+
+
 if __name__ == "__main__":
-    search_resp = search_from_phrase("น้ำ", page_size=10)
+
+    num_results = get_num_results(SEARCH_PHRASE, SEARCH_COLLECTION)
+    print(f"Found {num_results} results")
+    search_resp = search_from_phrase(
+        SEARCH_PHRASE, page_size=num_results, collection=SEARCH_COLLECTION
+    )
     result, debug_doc = extract_search_details(search_resp)
     with open("result.json", "w") as f:
         json.dump(result, f, indent=4)
     with open("debug_doc.json", "w") as f:
         json.dump(debug_doc, f, indent=4)
-
-    # resp = search_from_phrase('น้ำ', page_size=1000)
-    # print(json.dumps(resp, indent=4))
-
-    # for page in range(1,3):
-    #     resp = search_from_phrase('น้ำ', page=page)
-    #     for entry in resp["result"]["result"]:
-    #         print(entry["title"])
