@@ -10,10 +10,11 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 # Change to keywords and phrases for searching
-SEARCH_PHRASE = "จัดการ น้ำ"
+# SEARCH_PHRASE = "จัดการ น้ำ"
+SEARCH_PHRASE = ["การจัดการน้ำ"]
 
 # Change to desired ccollection for searching
-SEARCH_COLLECTION = "NRCT"
+SEARCH_COLLECTION = "TSDI"
 
 
 collections = {
@@ -24,31 +25,67 @@ collections = {
 }
 
 
-def search_from_phrase(phrase: str, collection="TDRI", page=1, page_size=10) -> Any:
+def search_from_phrase(
+    phrase: str | List[str], collection="TDRI", page=1, page_size=10
+) -> Any:
     assert collections[collection] is not None, "Unknown collection specified"
-    search_url = f"https://digital.library.tu.ac.th/tu_dc/frontend/Search/find/{(page - 1) * page_size}/0"
-    search_settings = {
-        "main": phrase,
-        "option": "all",
-        "collection_id": collections[collection]["id"],
-        "main_collection_id": "all",
-        "pubyear_start": None,
-        "pubyear_end": None,
-        "filter": {
-            "main_collection_id": [],
-            "collection_id": [],
-            "keyword_full": [],
-            "author_data_full": [],
-            "pubyear": [],
-        },
-        "filter_include": True,
-        "aggregate": True,
-        "sort": "_score",
-        "per_page": page_size,
-        "like_search": 0,
-    }
+    search_settings = None
+    if isinstance(phrase, str):
+        search_settings = {
+            "main": phrase,
+            "option": "all",
+            "collection_id": collections[collection]["id"],
+            "main_collection_id": "all",
+            "pubyear_start": None,
+            "pubyear_end": None,
+            "filter": {
+                "main_collection_id": [],
+                "collection_id": [],
+                "keyword_full": [],
+                "author_data_full": [],
+                "pubyear": [],
+            },
+            "filter_include": True,
+            "aggregate": True,
+            "sort": "_score",
+            "per_page": page_size,
+            "like_search": 0,
+        }
+        search_url = f"https://digital.library.tu.ac.th/tu_dc/frontend/Search/find/{(page - 1) * page_size}/0"
+    elif isinstance(phrase, List):
+        search_settings = []
+        for i, keyword in enumerate(phrase):
+            assert isinstance(keyword, str), "Unknown type of keyword"
+            setting_entry = {}
+            if i > 0:
+                setting_entry["cond"] = "must"
+            setting_entry["main"] = keyword
+            setting_entry["option"] = "all"
+            setting_entry["collection"] = [
+                collections["TDRI"]["id"],
+                collections["NRCT"]["id"],
+                collections["TSDI"]["id"],
+            ]
+            search_settings.append(setting_entry)
+        search_settings.append(
+            {
+                "sort": "title_asc",
+                "per_page": page_size,
+                "aggregate": True,
+                "filter": {
+                    "collection_id": [],
+                    "keyword_full": [],
+                    "author_data_full": [],
+                    "pubyear": [],
+                },
+                "filter_include": True,
+            }
+        )
+        search_url = f"https://digital.library.tu.ac.th/tu_dc/frontend/Search/find/{(page - 1) * page_size}/1"
+    else:
+        assert False, "Unknown type of phrase"
     form_data = {
-        "data": json.dumps(search_settings),
+        "data": json.dumps(search_settings, ensure_ascii=False, indent=4),
     }
     response = requests.post(search_url, data=form_data, verify=False)
     assert response.status_code == 200, "Unable to retrieve search results"
@@ -59,7 +96,7 @@ def search_from_phrase(phrase: str, collection="TDRI", page=1, page_size=10) -> 
 def search_recur(obj: Any, search_type: str) -> List[str]:
     occurences = []
     assert search_type in ["LINK", "EMAIL"], "Unknown search type"
-    link_pattern = r"https://\S+?(?=\s|$)"
+    link_pattern = r"https?://\S+?(?=\s|$)"
     email_pattern = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
     pattern = link_pattern if search_type == "LINK" else email_pattern
 
@@ -83,6 +120,8 @@ def get_links(entry_resp: Any) -> List[str]:
     if len(links) == 0:
         if not "digital" in entry_resp:
             return links
+        if entry_resp["digital"] is None:
+            return links
         if len(entry_resp["digital"]) == 0:
             return links
         dl_link = tu_dl_url.format(entry_resp["digital"][0]["doc_id"])
@@ -102,12 +141,14 @@ def extract_search_details(search_resp: Any) -> Tuple[Any, Any]:
     result = []
 
     accpeted_description_fld = ["description", "TH Abstract", "Table of contents"]
-    for entry in search_resp["result"]["result"]:
+    total_docs = len(search_resp["result"]["result"])
+    for i, entry in enumerate(search_resp["result"]["result"]):
         details = {}
         bibid = entry["bibid"]
         doc_url = detail_url.format(bibid)
         print("=" * 80)
-        print(doc_url)
+        print(f"\tcount: {i}/{total_docs}")
+        print(f"\turl:   {doc_url}")
         response = requests.get(doc_url, verify=False)
         if response.status_code != 200:
             continue
@@ -134,6 +175,7 @@ def extract_search_details(search_resp: Any) -> Tuple[Any, Any]:
             .strftime("%Y-%m-%d")
         )
         details["URL"] = get_links(entry_resp)
+        print(f"\tlinks: {details["URL"]}")
         details["authored_year"] = entry["pubyear_highlight"]
         result.append(details)
 
