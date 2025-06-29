@@ -30,6 +30,31 @@ def main(result_file: str):
                 author_str = f"{authors[0]} และคณะ"
             else:
                 author_str = entry["author"][0]
+
+        description = ""
+        if isinstance(entry["description"], list):
+            description = ",".join(entry["description"])
+        elif isinstance(entry["description"], str):
+            description = entry["description"]
+
+        keyword = ""
+        if isinstance(entry["keyword"], list):
+            keyword = ",".join(entry["keyword"])
+        elif isinstance(entry["keyword"], str):
+            keyword = entry["keyword"]
+
+        url = ""
+        if isinstance(entry["URL"], list):
+            url = ",".join(entry["URL"])
+        elif isinstance(entry["URL"], str):
+            url = entry["URL"]
+
+        email = ""
+        if isinstance(entry["email"], list):
+            email = ",".join(entry["email"])
+        elif isinstance(entry["email"], str):
+            email = entry["email"]
+
         csv_data.append(
             [
                 "",
@@ -39,8 +64,8 @@ def main(result_file: str):
                 entry["organization"],
                 "",
                 "",
-                ",".join(entry["keyword"]),
-                "" if entry["description"] is None else ",".join(entry["description"]),
+                keyword,
+                description,
                 "",
                 "",
                 "",
@@ -50,13 +75,13 @@ def main(result_file: str):
                 "",
                 entry["created_date"],
                 "",
-                ",".join(entry["URL"]),
+                url,
                 "",
                 "",
                 "",
                 "",
                 entry["authored_year"],
-                ",".join(entry["email"]),
+                email,
                 author_str,
             ]
         )
